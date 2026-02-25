@@ -22,10 +22,10 @@ app.get("/api/diakok", async (req, res) => {
   try {
     const [rows] = await pool.query("SELECT * FROM diakok");
 
-    // jelszo eltávolítása minden sorból
     const safe = rows.map((r) => {
       const row = { ...r };
-      delete row.jelszo;
+      // ha van jelszo oszlopod, sose menjen vissza
+      if ("jelszo" in row) delete row.jelszo;
       return row;
     });
 
@@ -36,36 +36,37 @@ app.get("/api/diakok", async (req, res) => {
   }
 });
 
+/**
+ * Belépés: OM azonosító + születési dátum
+ * Frontend body:
+ * { oktatasiAzonosito: "7300...", szuletesiDatum: "2011-09-05" }
+ */
 app.post("/api/belepes", async (req, res) => {
   try {
     const oktatasiAzonosito = String(req.body?.oktatasiAzonosito ?? "").trim();
-    const jelszo = String(req.body?.jelszo ?? "").trim();
+    const szuletesiDatum = String(req.body?.szuletesiDatum ?? "").trim(); // YYYY-MM-DD
 
-    if (!oktatasiAzonosito || !jelszo) {
+    if (!oktatasiAzonosito || !szuletesiDatum) {
       return res
         .status(400)
-        .json({ hiba: "Oktatási azonosító és jelszó kötelező" });
+        .json({ hiba: "OM azonosító és születési dátum kötelező" });
     }
 
-    // csak OM alapján kérjük le -> nem hasal el oszlophiányon
     const [rows] = await pool.query(
-      "SELECT * FROM diakok WHERE oktatasiazonosito = ? LIMIT 1",
-      [oktatasiAzonosito]
+      "SELECT * FROM diakok WHERE oktatasiazonosito = ? AND szuletesidatum = ? LIMIT 1",
+      [oktatasiAzonosito, szuletesiDatum]
     );
 
-    if (rows.length === 0) {
-      return res.status(401).json({ hiba: "Hibás azonosító vagy jelszó" });
+    if (!rows.length) {
+      return res
+        .status(401)
+        .json({ hiba: "Hibás azonosító vagy születési dátum" });
     }
 
     const diak = rows[0];
-    const dbJelszo = String(diak.jelszo ?? "").trim();
-
-    if (dbJelszo !== jelszo) {
-      return res.status(401).json({ hiba: "Hibás azonosító vagy jelszó" });
-    }
 
     // jelszo soha ne menjen vissza
-    delete diak.jelszo;
+    if (diak && typeof diak === "object" && "jelszo" in diak) delete diak.jelszo;
 
     return res.json(diak);
   } catch (err) {
@@ -74,6 +75,7 @@ app.post("/api/belepes", async (req, res) => {
   }
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("Szerver fut...");
+const PORT = Number(process.env.PORT || 3000);
+app.listen(PORT, () => {
+  console.log(`Szerver fut: ${PORT}`);
 });
