@@ -14,69 +14,62 @@ const pool = mysql.createPool({
   port: Number(process.env.DB_PORT || 3306),
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME, // pl. ganz
+  database: process.env.DB_NAME,
   ssl: { rejectUnauthorized: false },
 });
 
 app.get("/api/diakok", async (req, res) => {
   try {
     const [rows] = await pool.query("SELECT * FROM diakok");
-    res.json(rows);
+
+    // jelszo eltávolítása minden sorból
+    const safe = rows.map((r) => {
+      const row = { ...r };
+      delete row.jelszo;
+      return row;
+    });
+
+    res.json(safe);
   } catch (err) {
-    console.error(err);
+    console.error("DIÁKOK HIBA:", err);
     res.status(500).json({ hiba: "Adatbázis hiba" });
   }
 });
 
 app.post("/api/belepes", async (req, res) => {
   try {
-    const { oktatasiAzonosito, jelszo } = req.body;
+    const oktatasiAzonosito = String(req.body?.oktatasiAzonosito ?? "").trim();
+    const jelszo = String(req.body?.jelszo ?? "").trim();
 
     if (!oktatasiAzonosito || !jelszo) {
-      return res.status(400).json({ hiba: "Oktatási azonosító és jelszó kötelező" });
+      return res
+        .status(400)
+        .json({ hiba: "Oktatási azonosító és jelszó kötelező" });
     }
 
+    // csak OM alapján kérjük le -> nem hasal el oszlophiányon
     const [rows] = await pool.query(
-      `SELECT 
-         id, nev, oktatasiazonosito, anyjaneve, szuletesidatum,
-
-         het_irodalom, het_magyarnyelv, het_matematika, het_tortenelem, het_idegennyelv, het_fizika, het_technika,
-         nyolc_irodalom, nyolc_magyarnyelv, nyolc_matematika, nyolc_tortenelem, nyolc_idegennyelv, nyolc_fizika, nyolc_technika,
-
-         kozponti_pontok, magyar_pontok, matematika_pontok, hozott_pontok,
-         nyelvi_szintfelmeres, nyelvi_szintfelmeres_idopont,
-         ganziskola_ismerkedesi_pontok, ganz_idopont,
-         osszespont,
-
-         megjelolt_kepzes_1, megjelolt_kepzes_2, megjelolt_kepzes_3, megjelolt_kepzes_4,
-
-         jelolt_0101, jelolt_0102, jelolt_0103, jelolt_0104,
-
-         -- ELŐZETES RANGSOR: már 4 mező (ÚJ)
-         rangsor_kepzes_1, rangsor_helyezes_1,
-         rangsor_kepzes_2, rangsor_helyezes_2,
-         rangsor_kepzes_3, rangsor_helyezes_3,
-         rangsor_kepzes_4, rangsor_helyezes_4,
-
-         felvett_0101, felvett_0102, felvett_0103, felvett_0104,
-         felveteli_statusz, felvett_hova_kod,
-
-         felvett_kepzes, nem_felvett_kepzes,
-
-         letrehozva, modositva
-       FROM diakok
-       WHERE oktatasiazonosito = ? AND jelszo = ?
-       LIMIT 1`,
-      [oktatasiAzonosito, jelszo]
+      "SELECT * FROM diakok WHERE oktatasiazonosito = ? LIMIT 1",
+      [oktatasiAzonosito]
     );
 
     if (rows.length === 0) {
       return res.status(401).json({ hiba: "Hibás azonosító vagy jelszó" });
     }
 
-    return res.json(rows[0]);
+    const diak = rows[0];
+    const dbJelszo = String(diak.jelszo ?? "").trim();
+
+    if (dbJelszo !== jelszo) {
+      return res.status(401).json({ hiba: "Hibás azonosító vagy jelszó" });
+    }
+
+    // jelszo soha ne menjen vissza
+    delete diak.jelszo;
+
+    return res.json(diak);
   } catch (err) {
-    console.error(err);
+    console.error("BELEPÉS HIBA:", err);
     return res.status(500).json({ hiba: "Adatbázis hiba" });
   }
 });
