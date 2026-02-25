@@ -22,10 +22,10 @@ app.get("/api/diakok", async (req, res) => {
   try {
     const [rows] = await pool.query("SELECT * FROM diakok");
 
+    // jelszo eltávolítása minden sorból
     const safe = rows.map((r) => {
       const row = { ...r };
-      // ha van jelszo oszlopod, sose menjen vissza
-      if ("jelszo" in row) delete row.jelszo;
+      delete row.jelszo;
       return row;
     });
 
@@ -36,44 +36,44 @@ app.get("/api/diakok", async (req, res) => {
   }
 });
 
-/**
- * Belépés: OM azonosító + születési dátum
- * Frontend body:
- * { oktatasiAzonosito: "7300...", szuletesiDatum: "2011-09-05" }
- */
 app.post("/api/belepes", async (req, res) => {
   try {
-    const oktatasiAzonosito = String(req.body?.oktatasiAzonosito ?? "").trim()
-    const szuletesiDatum = String(req.body?.szuletesiDatum ?? "").trim() // YYYY-MM-DD
+    const oktatasiAzonosito = String(req.body?.oktatasiAzonosito ?? "").trim();
+    const jelszo = String(req.body?.jelszo ?? "").trim();
 
-    if (!oktatasiAzonosito || !szuletesiDatum) {
+    if (!oktatasiAzonosito || !jelszo) {
       return res
         .status(400)
-        .json({ hiba: "OM azonosító és születési dátum kötelező" })
+        .json({ hiba: "Oktatási azonosító és jelszó kötelező" });
     }
 
+    // csak OM alapján kérjük le -> nem hasal el oszlophiányon
     const [rows] = await pool.query(
-      "SELECT * FROM diakok WHERE oktatasiazonosito = ? AND szuletesidatum = ? LIMIT 1",
-      [oktatasiAzonosito, szuletesiDatum]
-    )
+      "SELECT * FROM diakok WHERE oktatasiazonosito = ? LIMIT 1",
+      [oktatasiAzonosito]
+    );
 
-    if (!rows.length) {
-      return res
-        .status(401)
-        .json({ hiba: "Hibás azonosító vagy születési dátum" })
+    if (rows.length === 0) {
+      return res.status(401).json({ hiba: "Hibás azonosító vagy jelszó" });
     }
 
-    const diak = rows[0]
-    if (diak && typeof diak === "object" && "jelszo" in diak) delete diak.jelszo
+    const diak = rows[0];
+    const dbJelszo = String(diak.jelszo ?? "").trim();
 
-    return res.json(diak)
+    if (dbJelszo !== jelszo) {
+      return res.status(401).json({ hiba: "Hibás azonosító vagy jelszó" });
+    }
+
+    // jelszo soha ne menjen vissza
+    delete diak.jelszo;
+
+    return res.json(diak);
   } catch (err) {
-    console.error("BELEPÉS HIBA:", err)
-    return res.status(500).json({ hiba: "Adatbázis hiba" })
+    console.error("BELEPÉS HIBA:", err);
+    return res.status(500).json({ hiba: "Adatbázis hiba" });
   }
-})
+});
 
-const PORT = Number(process.env.PORT || 3000);
-app.listen(PORT, () => {
-  console.log(`Szerver fut: ${PORT}`);
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Szerver fut...");
 });
