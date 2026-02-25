@@ -18,6 +18,44 @@ const pool = mysql.createPool({
   ssl: { rejectUnauthorized: false },
 });
 
+// ------------------------------
+// SEGÉD: dátum jellegű jelszó normalizálása
+//  - "2011. 9. 5." / "2011.09.05" / "2011-09-05" -> "2011-09-05"
+//  - ha nem dátum, akkor trimelt string marad
+// ------------------------------
+function normalizePassword(input) {
+  const s = String(input ?? "").trim();
+  if (!s) return "";
+
+  // 1) YYYY-MM-DD
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  // 2) YYYY. M. D. (ponttal, szóközökkel)
+  m = s.match(/^(\d{4})\.\s*(\d{1,2})\.\s*(\d{1,2})\.?$/);
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+    return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  // 3) Ha esetleg valamiért DATETIME-szerűt kapnál (nem kellene, de legyen stabil):
+  // "2011-09-05 00:00:00" -> "2011-09-05"
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+\d{2}:\d{2}:\d{2}$/);
+  if (m) {
+    return `${m[1]}-${m[2]}-${m[3]}`;
+  }
+
+  // egyéb: marad sima string
+  return s;
+}
+
 app.get("/api/diakok", async (req, res) => {
   try {
     const [rows] = await pool.query("SELECT * FROM diakok");
@@ -39,15 +77,14 @@ app.get("/api/diakok", async (req, res) => {
 app.post("/api/belepes", async (req, res) => {
   try {
     const oktatasiAzonosito = String(req.body?.oktatasiAzonosito ?? "").trim();
-    const jelszo = String(req.body?.jelszo ?? "").trim();
+    const jelszoInput = String(req.body?.jelszo ?? "").trim();
 
-    if (!oktatasiAzonosito || !jelszo) {
+    if (!oktatasiAzonosito || !jelszoInput) {
       return res
         .status(400)
         .json({ hiba: "Oktatási azonosító és jelszó kötelező" });
     }
 
-    // csak OM alapján kérjük le -> nem hasal el oszlophiányon
     const [rows] = await pool.query(
       "SELECT * FROM diakok WHERE oktatasiazonosito = ? LIMIT 1",
       [oktatasiAzonosito]
@@ -58,9 +95,12 @@ app.post("/api/belepes", async (req, res) => {
     }
 
     const diak = rows[0];
-    const dbJelszo = String(diak.jelszo ?? "").trim();
 
-    if (dbJelszo !== jelszo) {
+    // NORMALIZÁLT összehasonlítás
+    const dbJelszoNorm = normalizePassword(diak.jelszo);
+    const inputJelszoNorm = normalizePassword(jelszoInput);
+
+    if (!dbJelszoNorm || dbJelszoNorm !== inputJelszoNorm) {
       return res.status(401).json({ hiba: "Hibás azonosító vagy jelszó" });
     }
 
